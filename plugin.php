@@ -3,8 +3,8 @@
 Plugin Name: Yourls Discord Notify
 Plugin URI: 
 Description: Sends a notification to Discord when a short is created
-Version: 1.3
-Author: BradleyCIT
+Version: 1.4
+Author: 
 Author URI: 
 */
 
@@ -48,46 +48,35 @@ function notifier_post_add_new_link($args)
     }
 
     $data = $args[3];
+    if ($data['status'] !== 'success') return;
 
-    if ($data['status'] === 'success') {
-        $long_url = $data['url']['url'];
-        $short_url = $data['shorturl'];
-        $keyword   = parse_url($short_url, PHP_URL_PATH);
-        $keyword   = ltrim($keyword, '/');
-        $ip        = $data['url']['ip'];
-        $date      = new DateTime($data['url']['date']);
+    $long_url   = $data['url']['url'];
+    $short_url  = $data['shorturl'];
+    $keyword    = ltrim(parse_url($short_url, PHP_URL_PATH), '/');
+    $ip         = $data['url']['ip'];
+    $date       = new DateTime($data['url']['date']);
 
-        $embed = [
-            'title'       => 'New short URL created',
-            'description' => sprintf(
-                '**Long URL:** %s' . PHP_EOL . '**Short URL:** %s',
-                $long_url,
-                $short_url
-            ),
-            'color'       => 0x00ff00, // Green
-            'fields'      => [
-                [
-                    'name'   => 'Keyword',
-                    'value'  => $keyword,
-                    'inline' => true,
-                ],
-                [
-                    'name'   => 'IP Address',
-                    'value'  => $ip,
-                    'inline' => true,
-                ],
-            ],
-            'footer'      => ['text' => 'YOURLS Notifier'],
-            'timestamp'   => $date->format('c'),
-            'thumbnail'   => ['url' => 'https://yourls.org/assets/images/yourls-logo.png'],
-        ];
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+    $title = "New 🩳 URL created ($display_domain)";
 
-        notifier_discord($discord_webhook, $embed);
-    }
+    $embed = [
+        'title'       => $title,
+        'description' => "**Long URL:** $long_url\n**Short URL:** $short_url",
+        'color'       => 0x00ff00, // Green
+        'fields'      => [
+            ['name' => 'Keyword',     'value' => $keyword, 'inline' => true],
+            ['name' => 'IP Address',  'value' => $ip,      'inline' => true],
+        ],
+        'footer'      => ['text' => 'YOURLS Notifier'],
+        'timestamp'   => $date->format('c'),
+        'thumbnail'   => ['url' => 'https://yourls.org/assets/images/yourls-logo.png'],
+    ];
+
+    notifier_discord($discord_webhook, $embed);
 }
 
 /* ------------------------------------------------------------------ */
-/*  Short-URL accessed (click) – now with IP address                 */
+/*  Short-URL accessed (click) – with IP and emojis                   */
 /* ------------------------------------------------------------------ */
 function notifier_redirect_shorturl($args)
 {
@@ -96,12 +85,11 @@ function notifier_redirect_shorturl($args)
         return;
     }
 
-    $keyword   = $args[1];                     // e.g. "abc123"
-    $long_url  = $args[0];                     // full destination URL
-    $short_url = YOURLS_SITE . '/' . $keyword; // full short URL
+    $keyword   = $args[1];
+    $long_url  = $args[0];
+    $short_url = YOURLS_SITE . '/' . $keyword;
     $ip        = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
 
-    // ----- clicks count ------------------------------------------------
     try {
         $table  = YOURLS_DB_TABLE_URL;
         $clicks = yourls_get_db()->fetchValue(
@@ -113,40 +101,18 @@ function notifier_redirect_shorturl($args)
         $clicks = 'Unknown';
     }
 
-    // ----- build embed -------------------------------------------------
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+    $title = "🚀 Short URL accessed ($display_domain)";
+
     $embed = [
-        'title'       => 'Short URL accessed',
-        'description' => sprintf(
-            '**Redirect:** %s → %s',
-            $short_url,
-            $long_url
-        ),
+        'title'       => $title,
+        'description' => "**Redirect:** $short_url → [$long_url]",
         'color'       => 0x0099ff, // Blue
         'fields'      => [
-            // Short URL with link emoji
-            [
-                'name'   => 'Link Short URL',
-                'value'  => sprintf('[%s]', $short_url,),
-                'inline' => true,
-            ],
-            // Keyword with short emoji
-            [
-                'name'   => 'Short Keyword',
-                'value'  => sprintf('`%s`', $keyword),
-                'inline' => true,
-            ],
-            // Click count
-            [
-                'name'   => 'Total Clicks',
-                'value'  => (string)$clicks,
-                'inline' => true,
-            ],
-            // IP Address with globe emoji
-            [
-                'name'   => 'IP Address',
-                'value'  => $ip,
-                'inline' => true,
-            ],
+            ['name' => '🩳 🔗 URL', 'value' => "[$short_url]", 'inline' => true],
+            ['name' => 'Short Keyword',  'value' => "`$keyword`", 'inline' => true],
+            ['name' => 'Total Clicks',   'value' => (string)$clicks, 'inline' => true],
+            ['name' => 'IP Address',     'value' => $ip, 'inline' => true],
         ],
         'footer'      => ['text' => 'YOURLS Notifier'],
         'timestamp'   => (new DateTime())->format('c'),
@@ -192,7 +158,7 @@ function notifier_get_events_subscriptions()
 }
 
 /* ------------------------------------------------------------------ */
-/*  Settings page                                                     */
+/*  Settings page – with Display Domain field                         */
 /* ------------------------------------------------------------------ */
 function notifier_register_settings_page()
 {
@@ -202,6 +168,7 @@ function notifier_register_settings_page()
         'redirect_shorturl' => 'When a short URL is accessed',
     ];
 
+    // Save settings
     if (isset($_POST['discord_webhook'])) {
         yourls_verify_nonce('notifier_settings');
 
@@ -213,6 +180,9 @@ function notifier_register_settings_page()
             echo '<div class="updated"><p>Settings saved.</p></div>';
         }
 
+        $display_domain = trim($_POST['display_domain'] ?? '');
+        yourls_update_option('notifier_display_domain', $display_domain);
+
         $posted = $_POST['events'] ?? [];
         foreach ($events as $e => $on) {
             $events[$e] = isset($posted[$e]);
@@ -221,6 +191,7 @@ function notifier_register_settings_page()
     }
 
     $webhook = yourls_get_option('notifier_discord_webhook', '');
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
     $nonce   = yourls_create_nonce('notifier_settings');
 
     echo <<<HTML
@@ -233,6 +204,14 @@ function notifier_register_settings_page()
                 <th><label for="discord_webhook">Discord Webhook URL</label></th>
                 <td><input type="url" id="discord_webhook" name="discord_webhook" value="$webhook"
                            placeholder="https://discord.com/api/webhooks/..." size="80" /></td>
+            </tr>
+            <tr>
+                <th><label for="display_domain">Display Domain (in title)</label></th>
+                <td>
+                    <input type="text" id="display_domain" name="display_domain" value="$display_domain"
+                           placeholder="e.g. localhost, myshort.com" size="40" />
+                    <p class="description">Shown in titles like: <code>New short URL created (localhost)</code></p>
+                </td>
             </tr>
         </table>
 
