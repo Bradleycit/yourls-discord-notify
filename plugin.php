@@ -88,7 +88,7 @@ function notifier_post_add_new_link($args)
 
     $embed = [
         'title'       => $title,
-        'description' => "**Long URL:** $long_url\n**Short URL:** $short_url",
+        'description' => "**Short URL:** $short_url\n**Long URL:** <$long_url>",
         'color'       => 0x00ff00, // Green
         'fields'      => [
             ['name' => 'Keyword',     'value' => $keyword, 'inline' => true],
@@ -152,10 +152,61 @@ function notifier_redirect_shorturl($args)
 }
 
 /* ------------------------------------------------------------------ */
-/*  FAILED LOGIN – NO PASSWORD LOGGING (SECURITY FIX)                 */
+/*  IP Geolocation lookup                                             */
+/* ------------------------------------------------------------------ */
+function notifier_get_geolocation($ip) {
+    // Skip private/local IPs
+    if ($ip === 'Unknown' || filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
+        return null;
+    }
+
+    // Cache geolocation for 24 hours to avoid rate limits
+    $cache_key = "notifier_geo_$ip";
+    $cached = yourls_get_option($cache_key);
+    if ($cached && isset($cached['timestamp']) && (time() - $cached['timestamp']) < 86400) {
+        return $cached['data'];
+    }
+
+    // Use ip-api.com (free, no key required, 45 req/min limit)
+    $api_url = "http://ip-api.com/json/$ip?fields=status,message,country,countryCode,regionName,city,isp,org,lat,lon";
+    
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, $api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    $response = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($http_code !== 200 || empty($response)) {
+        return null;
+    }
+
+    $data = json_decode($response, true);
+    if (!$data || $data['status'] !== 'success') {
+        return null;
+    }
+
+    // Cache the result
+    yourls_update_option($cache_key, [
+        'timestamp' => time(),
+        'data' => $data
+    ]);
+
+    return $data;
+}
+
+/* ------------------------------------------------------------------ */
+/*  FAILED LOGIN – with geolocation                                   */
 /* ------------------------------------------------------------------ */
 yourls_add_action('login_failed', 'notifier_login_failed');
 function notifier_login_failed() {
+    // Only send notification if credentials were actually submitted
+    if (empty($_POST['username']) && empty($_POST['password'])) {
+        return; // Login page just loaded, not an actual failed attempt
+    }
+
     $webhook = yourls_get_option('notifier_discord_webhook');
     if (empty($webhook)) return;
 
@@ -165,19 +216,66 @@ function notifier_login_failed() {
     $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
     $domain = yourls_get_option('notifier_display_domain', 'YOURLS');
 
+    // Get geolocation if enabled
+    $geo_enabled = yourls_get_option('notifier_geolocation_enabled', true);
+    $geo = $geo_enabled ? notifier_get_geolocation($ip) : null;
+
+    $fields = [];
+    
+    // IP Address field
+    $fields[] = ['name' => '🌐 IP Address', 'value' => $ip, 'inline' => true];
+
+    // Geolocation fields if available
+    if ($geo) {
+        $location_parts = array_filter([
+            $geo['city'] ?? null,
+            $geo['regionName'] ?? null,
+            $geo['country'] ?? null
+        ]);
+        $location = implode(', ', $location_parts);
+        $flag = isset($geo['countryCode']) ? notifier_get_flag_emoji($geo['countryCode']) : '';
+        
+        if (!empty($location)) {
+            $fields[] = ['name' => '📍 Location', 'value' => "$flag $location", 'inline' => true];
+        }
+        
+        if (!empty($geo['isp'])) {
+            $fields[] = ['name' => '🏢 ISP', 'value' => $geo['isp'], 'inline' => true];
+        }
+
+        // Add map link if we have coordinates
+        if (isset($geo['lat']) && isset($geo['lon'])) {
+            $map_url = "https://www.google.com/maps?q={$geo['lat']},{$geo['lon']}";
+            $fields[] = ['name' => '🗺️ Map', 'value' => "[View on Map]($map_url)", 'inline' => true];
+        }
+    }
+
+    // User Agent field
+    $fields[] = ['name' => '💻 User Agent', 'value' => substr($user_agent, 0, 100) . (strlen($user_agent) > 100 ? '...' : ''), 'inline' => false];
+
     $embed = [
         'title' => "❌ Failed Login Attempt ($domain)",
         'description' => "**Username Attempted:** `$username`",
         'color' => 0xff0000,
-        'fields' => [
-            ['name' => 'IP Address', 'value' => $ip, 'inline' => true],
-            ['name' => 'User Agent', 'value' => substr($user_agent, 0, 100) . (strlen($user_agent) > 100 ? '...' : ''), 'inline' => false]
-        ],
+        'fields' => $fields,
         'footer' => ['text' => 'YOURLS Notifier'],
         'timestamp' => (new DateTime())->format('c')
     ];
 
     notifier_discord($webhook, $embed);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Get flag emoji from country code                                  */
+/* ------------------------------------------------------------------ */
+function notifier_get_flag_emoji($country_code) {
+    if (strlen($country_code) !== 2) return '';
+    
+    $country_code = strtoupper($country_code);
+    $first_letter = mb_chr(ord($country_code[0]) - ord('A') + 0x1F1E6);
+    $second_letter = mb_chr(ord($country_code[1]) - ord('A') + 0x1F1E6);
+    
+    return $first_letter . $second_letter;
 }
 
 /* ------------------------------------------------------------------ */
@@ -281,6 +379,9 @@ function notifier_register_settings_page()
             $cooldown = max(0, (int)($_POST['click_cooldown'] ?? 300));
             yourls_update_option('notifier_click_cooldown', $cooldown);
 
+            $geo_enabled = isset($_POST['geolocation_enabled']);
+            yourls_update_option('notifier_geolocation_enabled', $geo_enabled);
+
             $posted = $_POST['events'] ?? [];
             foreach ($events as $e => $on) {
                 $events[$e] = isset($posted[$e]);
@@ -309,6 +410,7 @@ function notifier_register_settings_page()
     $webhook = yourls_get_option('notifier_discord_webhook', '');
     $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
     $cooldown = yourls_get_option('notifier_click_cooldown', 300);
+    $geo_enabled = yourls_get_option('notifier_geolocation_enabled', true);
     $nonce   = yourls_create_nonce('notifier_settings');
 
     echo <<<HTML
@@ -355,6 +457,17 @@ function notifier_register_settings_page()
                 <td>
                     <input type="number" id="click_cooldown" name="click_cooldown" value="$cooldown" min="0" step="60" />
                     <p class="description">Seconds between notifications for the same URL (prevents spam). Set to 0 to disable rate limiting.</p>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="geolocation_enabled">Enable Geolocation for Failed Logins</label></th>
+                <td>
+HTML;
+    
+    $geo_checked = $geo_enabled ? 'checked' : '';
+    echo <<<HTML
+                    <input type="checkbox" id="geolocation_enabled" name="geolocation_enabled" $geo_checked />
+                    <p class="description">Show location, ISP, and map link for failed login attempts. Uses ip-api.com (free, 45 requests/minute limit). Data is cached for 24 hours per IP.</p>
                 </td>
             </tr>
         </table>
