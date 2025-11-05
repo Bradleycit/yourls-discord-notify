@@ -122,6 +122,40 @@ function notifier_redirect_shorturl($args)
 }
 
 /* ------------------------------------------------------------------ */
+/*  FAILED LOGIN – USERNAME + PASSWORD TRIED (MASKED)                 */
+/* ------------------------------------------------------------------ */
+yourls_add_action('login_failed', 'notifier_login_failed');
+function notifier_login_failed() {
+    $webhook = yourls_get_option('notifier_discord_webhook');
+    if (empty($webhook)) return;
+
+    $username = $_POST['username'] ?? 'Unknown';
+    $password = $_POST['password'] ?? 'Unknown';
+    $masked_password = strlen($password) > 2 ? substr($password, 0, 2) . str_repeat('*', strlen($password) - 2) : $password;
+
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+    $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+    $domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+
+    $embed = [
+        'title' => "❌ Failed Login Attempt ($domain)",
+        'description' => "**Username:** `$username`\n**Password Tried:** `$masked_password`",
+        'color' => 0xff0000,
+        'fields' => [
+            ['name' => 'IP Address', 'value' => $ip, 'inline' => true],
+            ['name' => 'User Agent', 'value' => substr($user_agent, 0, 100) . (strlen($user_agent) > 100 ? '...' : ''), 'inline' => false]
+        ],
+        'footer' => ['text' => 'YOURLS Notifier'],
+        'timestamp' => (new DateTime())->format('c')
+    ];
+
+    notifier_discord($webhook, $embed);
+}
+
+
+
+
+/* ------------------------------------------------------------------ */
 /*  Plugin bootstrap                                                  */
 /* ------------------------------------------------------------------ */
 yourls_add_action('plugins_loaded', 'notifier_loaded');
