@@ -14,6 +14,162 @@ if (!defined('YOURLS_ABSPATH')) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Link Deleted                                                      */
+/* ------------------------------------------------------------------ */
+function notifier_delete_link($args) {
+    $webhook = yourls_get_option('notifier_discord_webhook');
+    if (empty($webhook)) return;
+
+    $keyword = $args[0];
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+    $username = defined('YOURLS_USER') ? YOURLS_USER : 'Unknown';
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+
+    // Try to get URL info before it's deleted (might not be available)
+    $url_info = yourls_get_keyword_infos($keyword);
+    $long_url = isset($url_info['url']) ? $url_info['url'] : 'Unknown';
+    $clicks = isset($url_info['clicks']) ? $url_info['clicks'] : 'Unknown';
+
+    $embed = [
+        'title' => "🗑️ Short URL Deleted ($display_domain)",
+        'description' => "A short URL has been permanently deleted",
+        'color' => 0xff6b6b, // Red
+        'fields' => [
+            ['name' => '🔗 Keyword', 'value' => "`$keyword`", 'inline' => true],
+            ['name' => '📊 Total Clicks', 'value' => (string)$clicks, 'inline' => true],
+            ['name' => '👤 Deleted By', 'value' => "`$username`", 'inline' => true],
+            ['name' => '🌐 IP Address', 'value' => $ip, 'inline' => true],
+            ['name' => '🔗 Original URL', 'value' => strlen($long_url) > 100 ? substr($long_url, 0, 97) . '...' : $long_url, 'inline' => false],
+        ],
+        'footer' => ['text' => 'YOURLS Notifier'],
+        'timestamp' => (new DateTime())->format('c'),
+    ];
+
+    notifier_discord($webhook, $embed);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Link Edited - Simple success notification with geolocation        */
+/* ------------------------------------------------------------------ */
+function notifier_edit_link($args) {
+    $webhook = yourls_get_option('notifier_discord_webhook');
+    if (empty($webhook)) return;
+
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+    $username = defined('YOURLS_USER') ? YOURLS_USER : 'Unknown';
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+
+    // Get geolocation if enabled
+    $geo_enabled = yourls_get_option('notifier_geolocation_enabled', true);
+    $geo = $geo_enabled ? notifier_get_geolocation($ip) : null;
+
+    $fields = [
+        ['name' => '👤 Edited By', 'value' => "`$username`", 'inline' => true],
+        ['name' => '🌐 IP Address', 'value' => $ip, 'inline' => true],
+    ];
+
+    // Add geolocation fields if available
+    if ($geo) {
+        $location_parts = array_filter([
+            $geo['city'] ?? null,
+            $geo['regionName'] ?? null,
+            $geo['country'] ?? null
+        ]);
+        $location = implode(', ', $location_parts);
+        $flag = isset($geo['countryCode']) ? notifier_get_flag_emoji($geo['countryCode']) : '';
+        
+        if (!empty($location)) {
+            $fields[] = ['name' => '📍 Location', 'value' => "$flag $location", 'inline' => true];
+        }
+        
+        if (!empty($geo['isp'])) {
+            $fields[] = ['name' => '🏢 ISP', 'value' => $geo['isp'], 'inline' => true];
+        }
+
+        // Add map link if we have coordinates
+        if (isset($geo['lat']) && isset($geo['lon'])) {
+            $map_url = "https://www.google.com/maps?q={$geo['lat']},{$geo['lon']}";
+            $fields[] = ['name' => '🗺️ Map', 'value' => "[View on Map]($map_url)", 'inline' => true];
+        }
+    }
+
+    $embed = [
+        'title' => "✏️ Short URL Edited ($display_domain)",
+        'description' => "A short URL has been successfully edited",
+        'color' => 0xffa500, // Orange
+        'fields' => $fields,
+        'footer' => ['text' => 'YOURLS Notifier'],
+        'timestamp' => (new DateTime())->format('c'),
+    ];
+
+    notifier_discord($webhook, $embed);
+}
+
+/* ------------------------------------------------------------------ */
+/*  SUCCESSFUL LOGIN – with geolocation                               */
+/* ------------------------------------------------------------------ */
+function notifier_auth_successful() {
+    $webhook = yourls_get_option('notifier_discord_webhook');
+    if (empty($webhook)) return;
+
+    $username = defined('YOURLS_USER') ? YOURLS_USER : ($_POST['username'] ?? 'Unknown');
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'Unknown';
+    $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? 'Unknown';
+    $domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+
+    // Get geolocation if enabled
+    $geo_enabled = yourls_get_option('notifier_geolocation_enabled', true);
+    $geo = $geo_enabled ? notifier_get_geolocation($ip) : null;
+
+    $fields = [];
+    
+    // Username field
+    $fields[] = ['name' => '👤 User', 'value' => "`$username`", 'inline' => true];
+    
+    // IP Address field
+    $fields[] = ['name' => '🌐 IP Address', 'value' => $ip, 'inline' => true];
+
+    // Geolocation fields if available
+    if ($geo) {
+        $location_parts = array_filter([
+            $geo['city'] ?? null,
+            $geo['regionName'] ?? null,
+            $geo['country'] ?? null
+        ]);
+        $location = implode(', ', $location_parts);
+        $flag = isset($geo['countryCode']) ? notifier_get_flag_emoji($geo['countryCode']) : '';
+        
+        if (!empty($location)) {
+            $fields[] = ['name' => '📍 Location', 'value' => "$flag $location", 'inline' => true];
+        }
+        
+        if (!empty($geo['isp'])) {
+            $fields[] = ['name' => '🏢 ISP', 'value' => $geo['isp'], 'inline' => true];
+        }
+
+        // Add map link if we have coordinates
+        if (isset($geo['lat']) && isset($geo['lon'])) {
+            $map_url = "https://www.google.com/maps?q={$geo['lat']},{$geo['lon']}";
+            $fields[] = ['name' => '🗺️ Map', 'value' => "[View on Map]($map_url)", 'inline' => true];
+        }
+    }
+
+    // User Agent field
+    $fields[] = ['name' => '💻 User Agent', 'value' => substr($user_agent, 0, 100) . (strlen($user_agent) > 100 ? '...' : ''), 'inline' => false];
+
+    $embed = [
+        'title' => "✅ Successful Login ($domain)",
+        'description' => "**User:** `$username` logged in successfully",
+        'color' => 0x00ff00, // Green
+        'fields' => $fields,
+        'footer' => ['text' => 'YOURLS Notifier'],
+        'timestamp' => (new DateTime())->format('c')
+    ];
+
+    notifier_discord($webhook, $embed);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Discord sender – with improved error handling                     */
 /* ------------------------------------------------------------------ */
 function notifier_discord(string $webhook, array $embed)
@@ -103,7 +259,7 @@ function notifier_post_add_new_link($args)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Short-URL accessed (click) – with rate limiting                   */
+/*  Short-URL accessed (click) – with rate limiting and geolocation   */
 /* ------------------------------------------------------------------ */
 function notifier_redirect_shorturl($args)
 {
@@ -131,19 +287,50 @@ function notifier_redirect_shorturl($args)
         $clicks = 'Unknown';
     }
 
+    // Get geolocation if enabled
+    $geo_enabled = yourls_get_option('notifier_geolocation_enabled', true);
+    $geo = $geo_enabled ? notifier_get_geolocation($ip) : null;
+
     $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
     $title = "🚀 Short URL accessed ($display_domain)";
 
+    $fields = [
+        ['name' => '🩳 Short URL', 'value' => $short_url, 'inline' => true],
+        ['name' => 'Keyword',  'value' => "`$keyword`", 'inline' => true],
+        ['name' => 'Total Clicks', 'value' => (string)$clicks, 'inline' => true],
+        ['name' => '🌐 IP Address', 'value' => $ip, 'inline' => true],
+    ];
+
+    // Add geolocation fields if available
+    if ($geo) {
+        $location_parts = array_filter([
+            $geo['city'] ?? null,
+            $geo['regionName'] ?? null,
+            $geo['country'] ?? null
+        ]);
+        $location = implode(', ', $location_parts);
+        $flag = isset($geo['countryCode']) ? notifier_get_flag_emoji($geo['countryCode']) : '';
+        
+        if (!empty($location)) {
+            $fields[] = ['name' => '📍 Location', 'value' => "$flag $location", 'inline' => true];
+        }
+        
+        if (!empty($geo['isp'])) {
+            $fields[] = ['name' => '🏢 ISP', 'value' => $geo['isp'], 'inline' => true];
+        }
+
+        // Add map link if we have coordinates
+        if (isset($geo['lat']) && isset($geo['lon'])) {
+            $map_url = "https://www.google.com/maps?q={$geo['lat']},{$geo['lon']}";
+            $fields[] = ['name' => '🗺️ Map', 'value' => "[View on Map]($map_url)", 'inline' => true];
+        }
+    }
+
     $embed = [
         'title'       => $title,
-        'description' => "**Redirect:** $short_url → $long_url",
+        'description' => "**Redirect:** $short_url → <$long_url>",
         'color'       => 0x0099ff, // Blue
-        'fields'      => [
-            ['name' => '🩳 🔗 URL', 'value' => $short_url, 'inline' => true],
-            ['name' => 'Short Keyword',  'value' => "`$keyword`", 'inline' => true],
-            ['name' => 'Total Clicks',   'value' => (string)$clicks, 'inline' => true],
-            ['name' => 'IP Address',     'value' => $ip, 'inline' => true],
-        ],
+        'fields'      => $fields,
         'footer'      => ['text' => 'YOURLS Notifier'],
         'timestamp'   => (new DateTime())->format('c'),
     ];
@@ -200,7 +387,6 @@ function notifier_get_geolocation($ip) {
 /* ------------------------------------------------------------------ */
 /*  FAILED LOGIN – with geolocation                                   */
 /* ------------------------------------------------------------------ */
-yourls_add_action('login_failed', 'notifier_login_failed');
 function notifier_login_failed() {
     // Only send notification if credentials were actually submitted
     if (empty($_POST['username']) && empty($_POST['password'])) {
@@ -315,6 +501,10 @@ function notifier_loaded()
 {
     yourls_register_plugin_page('notifier_settings', 'Notifier', 'notifier_register_settings_page');
 
+    // Always register failed login notifications (security feature)
+    yourls_add_action('login_failed', 'notifier_login_failed');
+
+    // Register optional event notifications based on settings
     $events = notifier_get_events_subscriptions();
     foreach ($events as $event => $enabled) {
         if ($enabled) {
@@ -331,6 +521,9 @@ function notifier_get_events_subscriptions()
     $defaults = [
         'post_add_new_link' => true,
         'redirect_shorturl' => false,
+        'auth_successful' => false,
+        'delete_link' => true,
+        'edit_link' => true,
     ];
     $saved = yourls_get_option('notifier_events_subscriptions');
     if (is_array($saved)) {
@@ -352,6 +545,9 @@ function notifier_register_settings_page()
     $descriptions = [
         'post_add_new_link' => 'When a new link is shortened',
         'redirect_shorturl' => 'When a short URL is accessed',
+        'auth_successful' => 'When a user successfully logs in',
+        'delete_link' => 'When a short URL is deleted',
+        'edit_link' => 'When a short URL is edited',
     ];
 
     $test_result = null;
@@ -492,9 +688,10 @@ HTML;
 
     foreach ($events as $event => $enabled) {
         $checked = $enabled ? 'checked' : '';
+        $desc = $descriptions[$event] ?? $event;
         echo <<<HTML
             <tr>
-                <th><label for="$event">{$descriptions[$event]}</label></th>
+                <th><label for="$event">$desc</label></th>
                 <td><input type="checkbox" id="$event" name="events[$event]" $checked /></td>
             </tr>
 HTML;
