@@ -14,6 +14,179 @@ if (!defined('YOURLS_ABSPATH')) {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Daily/Weekly Summary Notifications                                */
+/* ------------------------------------------------------------------ */
+
+// Check if it's time to send summaries (called on admin page loads)
+yourls_add_action('admin_init', 'notifier_check_summaries');
+function notifier_check_summaries() {
+    $webhook = yourls_get_option('notifier_discord_webhook');
+    if (empty($webhook)) return;
+
+    $daily_enabled = yourls_get_option('notifier_daily_summary', false);
+    $weekly_enabled = yourls_get_option('notifier_weekly_summary', false);
+
+    if ($daily_enabled) {
+        notifier_maybe_send_daily_summary($webhook);
+    }
+
+    if ($weekly_enabled) {
+        notifier_maybe_send_weekly_summary($webhook);
+    }
+}
+
+function notifier_maybe_send_daily_summary($webhook) {
+    $last_sent = yourls_get_option('notifier_last_daily_summary', 0);
+    $now = time();
+    $today_start = strtotime('today midnight');
+
+    // Only send once per day, after midnight
+    if ($last_sent < $today_start) {
+        notifier_send_daily_summary($webhook);
+        yourls_update_option('notifier_last_daily_summary', $now);
+    }
+}
+
+function notifier_maybe_send_weekly_summary($webhook) {
+    $last_sent = yourls_get_option('notifier_last_weekly_summary', 0);
+    $now = time();
+    $week_start = strtotime('last Monday midnight');
+
+    // Only send once per week, on Monday
+    if ($last_sent < $week_start && date('N') == 1) { // 1 = Monday
+        notifier_send_weekly_summary($webhook);
+        yourls_update_option('notifier_last_weekly_summary', $now);
+    }
+}
+
+function notifier_send_daily_summary($webhook) {
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+    $stats = yourls_get_db_stats();
+
+    // Get yesterday's stats
+    $yesterday_start = strtotime('yesterday midnight');
+    $yesterday_end = strtotime('today midnight');
+    
+    $table = YOURLS_DB_TABLE_URL;
+    $log_table = YOURLS_DB_TABLE_LOG;
+    
+    // New links created yesterday
+    $new_links = yourls_get_db()->fetchValue(
+        "SELECT COUNT(*) FROM `$table` WHERE UNIX_TIMESTAMP(`timestamp`) >= :start AND UNIX_TIMESTAMP(`timestamp`) < :end",
+        ['start' => $yesterday_start, 'end' => $yesterday_end]
+    );
+
+    // Clicks yesterday
+    $clicks_yesterday = yourls_get_db()->fetchValue(
+        "SELECT COUNT(*) FROM `$log_table` WHERE UNIX_TIMESTAMP(`click_time`) >= :start AND UNIX_TIMESTAMP(`click_time`) < :end",
+        ['start' => $yesterday_start, 'end' => $yesterday_end]
+    );
+
+    // Top 5 clicked links yesterday
+    $top_links = yourls_get_db()->fetchObjects(
+        "SELECT keyword, COUNT(*) as clicks FROM `$log_table` 
+         WHERE UNIX_TIMESTAMP(`click_time`) >= :start AND UNIX_TIMESTAMP(`click_time`) < :end
+         GROUP BY keyword ORDER BY clicks DESC LIMIT 5",
+        ['start' => $yesterday_start, 'end' => $yesterday_end]
+    );
+
+    $top_links_text = '';
+    if (!empty($top_links)) {
+        foreach ($top_links as $link) {
+            $short_url = YOURLS_SITE . '/' . $link->keyword;
+            $top_links_text .= "• `{$link->keyword}` - {$link->clicks} clicks\n";
+        }
+    } else {
+        $top_links_text = "No clicks yesterday";
+    }
+
+    $description = "**Yesterday's Activity Summary**\n" . date('F j, Y', $yesterday_start);
+
+    $fields = [
+        ['name' => '🔗 Total Links', 'value' => number_format($stats['total_links']), 'inline' => true],
+        ['name' => '📊 Total Clicks', 'value' => number_format($stats['total_clicks']), 'inline' => true],
+        ['name' => '➕ New Links', 'value' => number_format($new_links), 'inline' => true],
+        ['name' => '👆 Clicks Yesterday', 'value' => number_format($clicks_yesterday), 'inline' => true],
+        ['name' => '🏆 Top Links Yesterday', 'value' => $top_links_text, 'inline' => false],
+    ];
+
+    $embed = [
+        'title' => "📅 Daily Summary ($display_domain)",
+        'description' => $description,
+        'color' => 0x5865F2, // Blurple
+        'fields' => $fields,
+        'footer' => ['text' => 'YOURLS Notifier'],
+        'timestamp' => (new DateTime())->format('c'),
+    ];
+
+    notifier_discord($webhook, $embed);
+}
+
+function notifier_send_weekly_summary($webhook) {
+    $display_domain = yourls_get_option('notifier_display_domain', 'YOURLS');
+    $stats = yourls_get_db_stats();
+
+    // Get last week's stats (Monday to Sunday)
+    $week_start = strtotime('last Monday midnight', strtotime('yesterday'));
+    $week_end = strtotime('last Sunday 23:59:59', strtotime('yesterday')) + 1;
+    
+    $table = YOURLS_DB_TABLE_URL;
+    $log_table = YOURLS_DB_TABLE_LOG;
+    
+    // New links created last week
+    $new_links = yourls_get_db()->fetchValue(
+        "SELECT COUNT(*) FROM `$table` WHERE UNIX_TIMESTAMP(`timestamp`) >= :start AND UNIX_TIMESTAMP(`timestamp`) < :end",
+        ['start' => $week_start, 'end' => $week_end]
+    );
+
+    // Clicks last week
+    $clicks_week = yourls_get_db()->fetchValue(
+        "SELECT COUNT(*) FROM `$log_table` WHERE UNIX_TIMESTAMP(`click_time`) >= :start AND UNIX_TIMESTAMP(`click_time`) < :end",
+        ['start' => $week_start, 'end' => $week_end]
+    );
+
+    // Top 10 clicked links last week
+    $top_links = yourls_get_db()->fetchObjects(
+        "SELECT keyword, COUNT(*) as clicks FROM `$log_table` 
+         WHERE UNIX_TIMESTAMP(`click_time`) >= :start AND UNIX_TIMESTAMP(`click_time`) < :end
+         GROUP BY keyword ORDER BY clicks DESC LIMIT 10",
+        ['start' => $week_start, 'end' => $week_end]
+    );
+
+    $top_links_text = '';
+    if (!empty($top_links)) {
+        foreach ($top_links as $link) {
+            $short_url = YOURLS_SITE . '/' . $link->keyword;
+            $top_links_text .= "• `{$link->keyword}` - {$link->clicks} clicks\n";
+        }
+    } else {
+        $top_links_text = "No clicks last week";
+    }
+
+    $description = "**Last Week's Activity Summary**\n" . 
+                   date('M j', $week_start) . ' - ' . date('M j, Y', $week_end - 1);
+
+    $fields = [
+        ['name' => '🔗 Total Links', 'value' => number_format($stats['total_links']), 'inline' => true],
+        ['name' => '📊 Total Clicks', 'value' => number_format($stats['total_clicks']), 'inline' => true],
+        ['name' => '➕ New Links', 'value' => number_format($new_links), 'inline' => true],
+        ['name' => '👆 Clicks Last Week', 'value' => number_format($clicks_week), 'inline' => true],
+        ['name' => '🏆 Top 10 Links Last Week', 'value' => $top_links_text, 'inline' => false],
+    ];
+
+    $embed = [
+        'title' => "📅 Weekly Summary ($display_domain)",
+        'description' => $description,
+        'color' => 0x5865F2, // Blurple
+        'fields' => $fields,
+        'footer' => ['text' => 'YOURLS Notifier'],
+        'timestamp' => (new DateTime())->format('c'),
+    ];
+
+    notifier_discord($webhook, $embed);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Link Deleted                                                      */
 /* ------------------------------------------------------------------ */
 function notifier_delete_link($args) {
