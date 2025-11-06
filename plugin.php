@@ -4,7 +4,7 @@ Plugin Name: Yourls Discord Notify
 Plugin URI: 
 Description: Sends a notification to Discord when a short is created
 Version: 1.6
-Author: 
+Author: BradleyCIT
 Author URI: 
 */
 
@@ -115,7 +115,7 @@ function notifier_send_daily_summary($webhook) {
         'description' => $description,
         'color' => 0x5865F2, // Blurple
         'fields' => $fields,
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c'),
     ];
 
@@ -179,7 +179,7 @@ function notifier_send_weekly_summary($webhook) {
         'description' => $description,
         'color' => 0x5865F2, // Blurple
         'fields' => $fields,
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c'),
     ];
 
@@ -214,7 +214,7 @@ function notifier_delete_link($args) {
             ['name' => '🌐 IP Address', 'value' => $ip, 'inline' => true],
             ['name' => '🔗 Original URL', 'value' => strlen($long_url) > 100 ? substr($long_url, 0, 97) . '...' : $long_url, 'inline' => false],
         ],
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c'),
     ];
 
@@ -271,7 +271,7 @@ function notifier_edit_link($args) {
         'description' => "A short URL has been successfully edited",
         'color' => 0xffa500, // Orange
         'fields' => $fields,
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c'),
     ];
 
@@ -335,7 +335,7 @@ function notifier_auth_successful() {
         'description' => "**User:** `$username` logged in successfully",
         'color' => 0x00ff00, // Green
         'fields' => $fields,
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c')
     ];
 
@@ -423,7 +423,7 @@ function notifier_post_add_new_link($args)
             ['name' => 'Keyword',     'value' => $keyword, 'inline' => true],
             ['name' => 'IP Address',  'value' => $ip,      'inline' => true],
         ],
-        'footer'      => ['text' => 'YOURLS Notifier'],
+        'footer'      => ['text' => 'YOURLS Discord Notify'],
         'timestamp'   => $date->format('c'),
         'thumbnail'   => ['url' => 'https://yourls.org/assets/images/yourls-logo.png'],
     ];
@@ -504,7 +504,7 @@ function notifier_redirect_shorturl($args)
         'description' => "**Redirect:** $short_url → <$long_url>",
         'color'       => 0x0099ff, // Blue
         'fields'      => $fields,
-        'footer'      => ['text' => 'YOURLS Notifier'],
+        'footer'      => ['text' => 'YOURLS Discord Notify'],
         'timestamp'   => (new DateTime())->format('c'),
     ];
 
@@ -617,7 +617,7 @@ function notifier_login_failed() {
         'description' => "**Username Attempted:** `$username`",
         'color' => 0xff0000,
         'fields' => $fields,
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c')
     ];
 
@@ -651,14 +651,14 @@ function notifier_test_webhook($webhook)
     
     $embed = [
         'title' => "✅ Test Notification ($display_domain)",
-        'description' => "This is a test notification from your YOURLS Notifier plugin.",
+        'description' => "This is a test notification from your YOURLS Discord Notify plugin.",
         'color' => 0x9b59b6, // Purple
         'fields' => [
             ['name' => 'Status', 'value' => '✓ Webhook is working correctly', 'inline' => false],
             ['name' => 'Tested By', 'value' => $user, 'inline' => true],
             ['name' => 'Test Time', 'value' => (new DateTime())->format('Y-m-d H:i:s'), 'inline' => true],
         ],
-        'footer' => ['text' => 'YOURLS Notifier'],
+        'footer' => ['text' => 'YOURLS Discord Notify'],
         'timestamp' => (new DateTime())->format('c'),
         'thumbnail' => ['url' => 'https://yourls.org/assets/images/yourls-logo.png'],
     ];
@@ -672,7 +672,7 @@ function notifier_test_webhook($webhook)
 yourls_add_action('plugins_loaded', 'notifier_loaded');
 function notifier_loaded()
 {
-    yourls_register_plugin_page('notifier_settings', 'Notifier', 'notifier_register_settings_page');
+    yourls_register_plugin_page('notifier_settings', 'Yourls Discord Notify', 'notifier_register_settings_page');
 
     // Always register failed login notifications (security feature)
     yourls_add_action('login_failed', 'notifier_login_failed');
@@ -799,7 +799,7 @@ function notifier_register_settings_page()
 </style>
 
 <div class="wrap">
-    <h2>Notifier Settings</h2>
+    <h2>Yourls Discord Notify Settings</h2>
     <form method="post">
         <input type="hidden" name="nonce" value="$nonce" />
         <table class="form-table">
