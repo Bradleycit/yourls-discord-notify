@@ -258,6 +258,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Built for [YOURLS](https://yourls.org/)
 - Geolocation by [ip-api.com](https://ip-api.com)
 - Discord webhook integration
+- https://github.com/SosthenG/yourls-notifier for the original code.
 
 ## 💬 Support
 
